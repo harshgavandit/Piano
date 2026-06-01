@@ -1,20 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Meta: Document encoding and viewport settings for responsive design -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <!-- Page title shown in browser tab -->
     <title>✨ 3D Aural Universe · play the cosmos</title>
     <style>
+        /* Main page styling - black background for space effect */
         body {
             margin: 0;
-            overflow: hidden;
-            background: #000;
+            overflow: hidden;        /* Hide scrollbars */
+            background: #000;        /* Pure black for deep space aesthetic */
             font-family: 'Segoe UI', sans-serif;
-            cursor: grab;
+            cursor: grab;            /* Indicate that canvas is draggable */
         }
+
+        /* Canvas fills entire viewport */
         canvas {
             display: block;
         }
+
+        /* Instruction hint that fades away */
         .hint {
             position: fixed;
             bottom: 30px;
@@ -24,25 +31,29 @@
             font-size: 14px;
             letter-spacing: 1px;
             text-align: center;
-            pointer-events: none;
+            pointer-events: none;    /* Doesn't interfere with canvas interaction */
             z-index: 10;
-            background: rgba(10,10,25,0.5);
-            backdrop-filter: blur(15px);
+            background: rgba(10,10,25,0.5);    /* Semi-transparent dark background */
+            backdrop-filter: blur(15px);       /* Blur effect for glass morphism */
             padding: 10px 25px;
-            border-radius: 50px;
+            border-radius: 50px;               /* Pill-shaped button */
             border: 1px solid rgba(255,255,255,0.2);
-            animation: fadeHint 6s forwards;
+            animation: fadeHint 6s forwards;   /* Fade out after 6 seconds */
         }
+
+        /* Animation: fade hint text to transparent */
         @keyframes fadeHint {
             0% { opacity: 1; }
-            70% { opacity: 1; }
-            100% { opacity: 0; }
+            70% { opacity: 1; }      /* Stay visible for 70% of duration */
+            100% { opacity: 0; }     /* Fade out in final 30% */
         }
     </style>
 </head>
 <body>
+    <!-- Instruction hint: fades away after first key press -->
     <div class="hint">🎹 Press any letter key · Drag to orbit · Scroll to zoom</div>
 
+    <!-- Import map: specifies where to load Three.js library from CDN -->
     <script type="importmap">
         {
             "imports": {
@@ -54,112 +65,178 @@
     <script type="module">
         import * as THREE from 'three';
 
-        // ---------- DOM ----------
+        // ===== DOM SETUP =====
+        // Create canvas element and append to body for rendering
         const canvas = document.createElement('canvas');
         document.body.appendChild(canvas);
+        // Get reference to the instruction hint element that fades away after first key press
         const hint = document.querySelector('.hint');
 
-        // ---------- Audio setup ----------
+        // ===== AUDIO CONTEXT INITIALIZATION =====
+        // Initialize Web Audio API context; fallback to webkit version for older browsers
         let audioCtx;
         try {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        } catch (e) { /* audio unavailable */ }
+        } catch (e) { /* audio unavailable on this browser */ }
 
-        // ---------- Key mapping (pentatonic, multi‑octave) ----------
+        // ===== MUSICAL KEY MAPPING (PENTATONIC SCALE) =====
+        // Maps keyboard keys to musical frequencies using a pentatonic scale
         const keyFreqs = {};
+        // Base frequency (C3 in Hz)
         const baseC = 130.81;
+        // Pentatonic ratios: frequencies relative to the base note (creates harmonious intervals)
         const pentatonicRatios = [1, 9/8, 5/4, 3/2, 5/3, 2, 9/4, 5/2];
-        // Rows from bottom to top, adding octave shift
+        // Define four rows of keys, each representing a different octave
         const keyRows = [
-            'zxcvbnm,',    // octave -1
+            'zxcvbnm,',    // octave -1 (lowest)
             'asdfghjkl',    // base octave
             'qwertyuio',    // octave +1
-            '1234567890'    // octave +2
+            '1234567890'    // octave +2 (highest)
         ];
+        // Populate keyFreqs object: iterate through each row and calculate frequency for each key
         keyRows.forEach((row, rowIndex) => {
-            const octaveShift = rowIndex - 1; // -1,0,1,2
+            // Each row is offset by octaves: row 0 = -1 octaves, row 1 = base, row 2 = +1, row 3 = +2
+            const octaveShift = rowIndex - 1;
             for (let i = 0; i < row.length; i++) {
                 const key = row[i].toLowerCase();
+                // Get pentatonic ratio for this position in the row
                 const ratio = pentatonicRatios[i % pentatonicRatios.length];
+                // Calculate frequency: baseC * octave_multiplier * pentatonic_ratio
                 const freq = baseC * Math.pow(2, octaveShift) * ratio;
                 keyFreqs[key] = freq;
             }
         });
 
-        // ---------- Three.js setup ----------
+        // ===== THREE.JS RENDERER & SCENE SETUP =====
+        // Create WebGL renderer with antialiasing enabled for smooth visuals
         const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+        // Set pixel ratio for high-DPI displays (cap at 2x to maintain performance)
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        // Set renderer size to fill the window
         renderer.setSize(window.innerWidth, window.innerHeight);
+        // Set dark background color (near-black for space effect)
         renderer.setClearColor(0x030310);
 
+        // Create 3D scene
         const scene = new THREE.Scene();
+        // Create perspective camera with specific field of view and clipping planes
         const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, 60);
+        // Position camera to view the central scene (x, y, z)
         camera.position.set(8, 4, 12);
+        // Point camera toward the origin
         camera.lookAt(0, 0, 0);
 
-        // ---------- Glow texture (for particles) ----------
+        // ===== GLOW TEXTURE GENERATION =====
+        // Creates a soft glowing texture using a radial gradient for particle effects
         function createGlowTexture() {
+            // Create 128x128 texture canvas
             const size = 128;
             const c = document.createElement('canvas');
             c.width = c.height = size;
             const ctx = c.getContext('2d');
+            // Create radial gradient centered on the canvas, fading from white to transparent
             const gradient = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+            // Gradient color stops: bright center to transparent edges
             gradient.addColorStop(0, 'rgba(255,255,255,1)');
             gradient.addColorStop(0.2, 'rgba(255,255,200,1)');
             gradient.addColorStop(0.5, 'rgba(255,150,100,0.8)');
             gradient.addColorStop(1, 'rgba(0,0,0,0)');
+            // Fill canvas with gradient
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, size, size);
+            // Convert canvas to Three.js texture
             return new THREE.CanvasTexture(c);
         }
+        // Generate glow texture for use on particles and visual effects
         const glowMap = createGlowTexture();
 
-        // ---------- Dynamic particles (bursts) ----------
+        // ===== DYNAMIC PARTICLES (BURSTS FROM KEY PRESSES) =====
+        // Maximum number of particles that can be rendered simultaneously
         const MAX_DYNAMIC = 4000;
-        const dynamicParticles = []; // { pos, vel, life, color, size }
+        // Array storing active particle data: position, velocity, life, decay, color, size
+        const dynamicParticles = [];
+        // Create geometry buffer for particles
         const dynGeometry = new THREE.BufferGeometry();
-        const dynPositions = new Float32Array(MAX_DYNAMIC * 3);
-        const dynColors = new Float32Array(MAX_DYNAMIC * 3);
-        const dynSizes = new Float32Array(MAX_DYNAMIC);
+        // Pre-allocate arrays for particle attributes (position, color, size)
+        const dynPositions = new Float32Array(MAX_DYNAMIC * 3); // x,y,z for each particle
+        const dynColors = new Float32Array(MAX_DYNAMIC * 3);    // r,g,b for each particle
+        const dynSizes = new Float32Array(MAX_DYNAMIC);        // individual size for each particle
+        // Assign attributes to geometry for rendering
         dynGeometry.setAttribute('position', new THREE.BufferAttribute(dynPositions, 3));
         dynGeometry.setAttribute('color', new THREE.BufferAttribute(dynColors, 3));
         dynGeometry.setAttribute('size', new THREE.BufferAttribute(dynSizes, 1));
-        // Initially empty, draw range 0
+        // Initially set draw range to 0 (no particles to render)
         dynGeometry.setDrawRange(0, 0);
 
-        const dynMaterial = new THREE.PointsMaterial({
-            size: 0.35,
-            map: glowMap,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            depthTest: true,
+        // Create custom shader material for particles with special effects
+        const dynMaterial = new THREE.ShaderMaterial({
             transparent: true,
-            vertexColors: true,
-            sizeAttenuation: true,
+            blending: THREE.AdditiveBlending, // Particles add light together
+            depthWrite: false,                 // Don't update depth buffer (particles on top)
+            depthTest: true,                   // Still respect depth for layering
+            vertexColors: true,                // Use per-vertex colors from buffer
+            uniforms: {
+                pointTexture: { value: glowMap },
+                pixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
+            },
+            // Vertex shader: position and scale particles in 3D space
+            vertexShader: `
+                attribute float size;
+                attribute vec3 color;
+                varying vec3 vColor;
+                uniform float pixelRatio;
+                void main() {
+                    vColor = color;
+                    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                    // Scale particles based on distance from camera (perspective effect)
+                    gl_PointSize = size * (300.0 / -mvPosition.z) * pixelRatio;
+                    gl_Position = projectionMatrix * mvPosition;
+                }
+            `,
+            // Fragment shader: apply glow texture and color to particles
+            fragmentShader: `
+                uniform sampler2D pointTexture;
+                varying vec3 vColor;
+                void main() {
+                    // Sample glow texture and multiply by particle color
+                    vec4 tex = texture2D(pointTexture, gl_PointCoord);
+                    gl_FragColor = vec4(vColor, 1.0) * tex;
+                }
+            `,
         });
+        // Create points mesh from geometry and material, add to scene
         const dynPoints = new THREE.Points(dynGeometry, dynMaterial);
         scene.add(dynPoints);
 
-        // ---------- Background stars ----------
+        // ===== BACKGROUND STARS =====
+        // Number of stars to render in background
         const starCount = 1800;
+        // Create geometry for stars
         const starGeo = new THREE.BufferGeometry();
+        // Pre-allocate arrays for star positions and colors
         const starPositions = new Float32Array(starCount * 3);
         const starColors = new Float32Array(starCount * 3);
+        // Generate random star positions in a spherical distribution
         for (let i = 0; i < starCount; i++) {
-            const radius = 15 + Math.random() * 30;
-            const theta = Math.random() * Math.PI * 2;
-            const phi = Math.acos(2 * Math.random() - 1);
+            // Use spherical coordinates (radius, theta, phi) for even distribution
+            const radius = 15 + Math.random() * 30;          // Distance from center
+            const theta = Math.random() * Math.PI * 2;       // Azimuth angle (0-2π)
+            const phi = Math.acos(2 * Math.random() - 1);   // Polar angle (0-π, uniform distribution)
+            // Convert spherical to Cartesian coordinates
             starPositions[i*3] = Math.sin(phi) * Math.cos(theta) * radius;
             starPositions[i*3+1] = Math.sin(phi) * Math.sin(theta) * radius * 0.6;
             starPositions[i*3+2] = Math.cos(phi) * radius;
-            const hue = Math.random() * 0.2 + 0.55;
+            // Assign random colors to stars (blue-ish hues with brightness variation)
+            const hue = Math.random() * 0.2 + 0.55;    // Hue between blue and cyan
             const col = new THREE.Color().setHSL(hue, 0.8, 0.7 + Math.random() * 0.3);
             starColors[i*3] = col.r;
             starColors[i*3+1] = col.g;
             starColors[i*3+2] = col.b;
         }
+        // Add position and color attributes to geometry
         starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
         starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+        // Create material for stars: small glowing points with additive blending
         const starMat = new THREE.PointsMaterial({
             size: 0.12,
             map: glowMap,
@@ -168,47 +245,62 @@
             vertexColors: true,
             sizeAttenuation: true,
         });
+        // Create points mesh for stars and add to scene
         const stars = new THREE.Points(starGeo, starMat);
         scene.add(stars);
 
-        // ---------- Central core ----------
+        // ===== CENTRAL CORE (UNIVERSE CENTER) =====
+        // Create spherical core mesh at the center
         const coreGeom = new THREE.SphereGeometry(0.6, 32, 32);
         const coreMat = new THREE.MeshBasicMaterial({ color: 0xffaa88 });
         const core = new THREE.Mesh(coreGeom, coreMat);
         scene.add(core);
-        // Core glow sprite
+
+        // Add glowing sprite halo around core
         const spriteTex = createGlowTexture();
         const spriteMat = new THREE.SpriteMaterial({ map: spriteTex, blending: THREE.AdditiveBlending, depthWrite: false, color: 0xffaa88 });
         const coreSprite = new THREE.Sprite(spriteMat);
         coreSprite.scale.set(4, 4, 1);
         core.add(coreSprite);
-        // Pulsing light
+
+        // Add point light from core for ambient lighting and visual glow
         const pointLight = new THREE.PointLight(0xffaa88, 1.2, 15);
         core.add(pointLight);
 
-        // ---------- Orbiting rings ----------
+        // ===== ORBITING RINGS =====
+        // Function to create a decorative torus ring with rotation
         function createRing(radius, color, rotationSpeed, tiltX, tiltZ) {
+            // Create torus geometry: primary radius, tube radius, segments
             const ringGeo = new THREE.TorusGeometry(radius, 0.03, 32, 120);
             const ringMat = new THREE.MeshBasicMaterial({ color, blending: THREE.AdditiveBlending, depthWrite: false });
             const ring = new THREE.Mesh(ringGeo, ringMat);
+            // Tilt ring in 3D space
             ring.rotation.x = tiltX;
             ring.rotation.z = tiltZ;
+            // Store rotation speed for animation
             ring.userData = { speed: rotationSpeed, baseRot: ring.rotation.clone() };
             return ring;
         }
+        // Create three orbiting rings with different colors, speeds, and tilts
         const rings = [
-            createRing(1.8, 0xff6688, 0.2, Math.PI/2, 0),
-            createRing(2.4, 0x66aaff, -0.3, Math.PI/3, Math.PI/6),
-            createRing(2.2, 0x88ffaa, 0.25, Math.PI/2.2, Math.PI/4),
+            createRing(1.8, 0xff6688, 0.2, Math.PI/2, 0),           // Pink ring
+            createRing(2.4, 0x66aaff, -0.3, Math.PI/3, Math.PI/6),  // Blue ring
+            createRing(2.2, 0x88ffaa, 0.25, Math.PI/2.2, Math.PI/4),// Green ring
         ];
+        // Add all rings to scene
         rings.forEach(r => scene.add(r));
 
-        // ---------- Camera controls ----------
+        // ===== CAMERA CONTROLS (MOUSE & TOUCH) =====
+        // Track mouse/touch dragging state
         let isDragging = false;
+        // Store previous mouse position for drag delta calculation
         let prevMouse = { x: 0, y: 0 };
-        let spherical = { radius: 13, theta: 0.8, phi: 1.1 }; // initial camera spherical coords
+        // Spherical coordinates for camera position (radius, horizontal angle, vertical angle)
+        let spherical = { radius: 13, theta: 0.8, phi: 1.1 };
+        // Point that camera always looks toward (center of universe)
         const target = new THREE.Vector3(0, 0, 0);
 
+        // Convert spherical coordinates to Cartesian and update camera position
         function updateCameraPosition() {
             const sinPhi = Math.sin(spherical.phi);
             const x = spherical.radius * sinPhi * Math.sin(spherical.theta);
@@ -217,36 +309,49 @@
             camera.position.set(x, y, z);
             camera.lookAt(target);
         }
+        // Apply initial camera position
         updateCameraPosition();
 
+        // ===== MOUSE CONTROLS =====
+        // Detect mouse button press to start dragging
         canvas.addEventListener('mousedown', (e) => {
             isDragging = true;
             prevMouse.x = e.clientX;
             prevMouse.y = e.clientY;
             canvas.style.cursor = 'grabbing';
         });
+        // Detect mouse button release to stop dragging
         window.addEventListener('mouseup', () => {
             isDragging = false;
             canvas.style.cursor = 'grab';
         });
+        // Track mouse movement and update camera spherical coordinates
         window.addEventListener('mousemove', (e) => {
             if (!isDragging) return;
             const dx = e.clientX - prevMouse.x;
             const dy = e.clientY - prevMouse.y;
+            // Adjust horizontal angle based on horizontal mouse movement
             spherical.theta -= dx * 0.005;
+            // Adjust vertical angle based on vertical mouse movement
             spherical.phi -= dy * 0.005;
+            // Clamp vertical angle to avoid flipping camera
             spherical.phi = Math.max(0.2, Math.min(Math.PI - 0.2, spherical.phi));
             prevMouse.x = e.clientX;
             prevMouse.y = e.clientY;
             updateCameraPosition();
         });
+        // Handle mouse wheel zoom
         canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
+            // Increase/decrease camera distance from center based on scroll direction
             spherical.radius += e.deltaY * 0.01;
+            // Clamp zoom distance to reasonable bounds
             spherical.radius = Math.max(3.5, Math.min(22, spherical.radius));
             updateCameraPosition();
         }, { passive: false });
-        // Touch support
+
+        // ===== TOUCH CONTROLS (MOBILE) =====
+        // Start touch drag
         canvas.addEventListener('touchstart', (e) => {
             e.preventDefault();
             if (e.touches.length === 1) {
@@ -255,6 +360,7 @@
                 prevMouse.y = e.touches[0].clientY;
             }
         });
+        // Update camera during touch drag
         canvas.addEventListener('touchmove', (e) => {
             e.preventDefault();
             if (isDragging && e.touches.length === 1) {
@@ -268,156 +374,200 @@
                 updateCameraPosition();
             }
         }, { passive: false });
+        // End touch drag
         canvas.addEventListener('touchend', () => { isDragging = false; });
 
-        // ---------- Audio + visual trigger ----------
+        // ===== AUDIO & VISUAL TRIGGER (KEY PRESS) =====
+        // Plays audio note and creates visual particle burst when key is pressed
         function playNote(key) {
             const freq = keyFreqs[key.toLowerCase()];
             if (!freq) return;
 
-            // Audio
+            // ===== AUDIO SYNTHESIS =====
+            // Only play audio if audio context is available and running
             if (audioCtx && audioCtx.state === 'running') {
                 const now = audioCtx.currentTime;
+                // Create two oscillators for richer sound (layering)
                 const osc1 = audioCtx.createOscillator();
                 const osc2 = audioCtx.createOscillator();
+                // Create gain node to control overall volume envelope
                 const gain = audioCtx.createGain();
+                // Create low-pass filter to shape the tone
                 const filter = audioCtx.createBiquadFilter();
 
+                // Configure first oscillator: triangle wave at base frequency
                 osc1.type = 'triangle';
                 osc1.frequency.value = freq;
+                // Configure second oscillator: sine wave at slightly higher frequency for harmonics
                 osc2.type = 'sine';
                 osc2.frequency.value = freq * 2.02;
+                // Configure low-pass filter: starts bright, fades to dark
                 filter.type = 'lowpass';
                 filter.frequency.setValueAtTime(1800, now);
                 filter.frequency.exponentialRampToValueAtTime(250, now + 0.35);
+                // Configure volume envelope: attack and decay
                 gain.gain.setValueAtTime(0.18, now);
                 gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
 
+                // Connect audio nodes: oscillators → filter → gain → speakers
                 osc1.connect(filter);
                 osc2.connect(filter);
                 filter.connect(gain);
                 gain.connect(audioCtx.destination);
+                // Start oscillators and schedule stop
                 osc1.start(now);
                 osc2.start(now);
                 osc1.stop(now + 0.55);
                 osc2.stop(now + 0.55);
             }
 
-            // Visual: burst particles from core
+            // ===== VISUAL EFFECTS =====
+            // Calculate particle color based on frequency (frequency → hue mapping)
             const hue = ((freq - 80) / 600) * 360;
             const color = new THREE.Color().setHSL(hue % 360 / 360, 1, 0.6);
+            // Create burst of particles emanating from core
             const burstCount = 24;
-            const spawnPos = new THREE.Vector3(0, 0, 0); // core
+            const spawnPos = new THREE.Vector3(0, 0, 0);
 
+            // Generate individual particles in random directions
             for (let i = 0; i < burstCount; i++) {
+                // Create random direction vector in 3D space
                 const dir = new THREE.Vector3(
                     (Math.random() - 0.5) * 2,
                     (Math.random() - 0.5) * 2,
                     (Math.random() - 0.5) * 2
                 ).normalize();
+                // Calculate particle speed based on frequency (higher notes = faster particles)
                 const speed = 1.5 + Math.random() * 4.5 + (freq / 200);
+                // Create particle object with initial state
                 const particle = {
                     pos: spawnPos.clone(),
                     vel: dir.multiplyScalar(speed),
-                    life: 1.0,
-                    decay: 0.008 + Math.random() * 0.025,
-                    color: color.clone(),
-                    size: 0.18 + Math.random() * 0.5,
+                    life: 1.0,                           // Particle lifespan (0-1)
+                    decay: 0.008 + Math.random() * 0.025, // Rate of fade per frame
+                    color: color.clone(),                // Color based on note frequency
+                    size: 0.18 + Math.random() * 0.5,    // Random size variation
                 };
-                // Add to dynamic list
+                // Remove oldest particle if at max capacity
                 if (dynamicParticles.length >= MAX_DYNAMIC) {
-                    dynamicParticles.shift(); // remove oldest
+                    dynamicParticles.shift();
                 }
+                // Add new particle to active list
                 dynamicParticles.push(particle);
             }
 
-            // Core pulse
+            // Make core pulse when note plays
             core.scale.set(1.5, 1.5, 1.5);
         }
 
-        // Keyboard listener
+        // ===== KEYBOARD HANDLER =====
+        // Listen for key presses and trigger audio/visual effects
         window.addEventListener('keydown', (e) => {
+            // Ignore repeat events (key held down)
             if (e.repeat) return;
             const key = e.key;
+            // Only respond to single characters that are mapped to frequencies
             if (key.length === 1 && keyFreqs[key.toLowerCase()]) {
                 e.preventDefault();
-                playNote(key);
-                // Resume audio context on first interaction
+                // Resume audio context if suspended (required by browser security)
                 if (audioCtx && audioCtx.state === 'suspended') {
-                    audioCtx.resume();
+                    audioCtx.resume().then(() => playNote(key));
+                } else {
+                    playNote(key);
                 }
-                // Hide hint
+                // Hide instruction hint after first key press
                 if (hint) hint.style.opacity = '0';
             }
         });
 
-        // ---------- Animation loop ----------
+        // ===== ANIMATION LOOP =====
+        // Clock for tracking delta time between frames
         let clock = new THREE.Clock();
 
+        // Main animation function - runs every frame via requestAnimationFrame
         function animate() {
+            // Calculate delta time since last frame (capped at 0.1s to prevent large jumps)
             const dt = Math.min(0.1, clock.getDelta());
             const time = performance.now() * 0.001;
 
-            // Rotate background stars
+            // Slowly rotate background stars
             stars.rotation.y += 0.03 * dt;
             stars.rotation.x += 0.01 * dt;
 
-            // Rotate rings
+            // Rotate orbiting rings at their individual speeds
             rings.forEach(ring => {
                 ring.rotation.z += ring.userData.speed * dt;
                 ring.rotation.x += ring.userData.speed * 0.5 * dt;
             });
 
-            // Update dynamic particles
+            // Update and remove dead particles
             for (let i = dynamicParticles.length - 1; i >= 0; i--) {
                 const p = dynamicParticles[i];
+                // Decrease particle life over time
                 p.life -= p.decay * dt * 60;
+                // Remove particle if life expired
                 if (p.life <= 0.02) {
                     dynamicParticles.splice(i, 1);
                     continue;
                 }
+                // Update particle position based on velocity
                 p.pos.x += p.vel.x * dt;
                 p.pos.y += p.vel.y * dt;
                 p.pos.z += p.vel.z * dt;
-                // slight damping
+                // Apply friction to slow particles down over time
                 p.vel.multiplyScalar(0.998);
             }
 
-            // Update geometry buffers
+            // Transfer particle data to GPU buffers for rendering
             const count = Math.min(dynamicParticles.length, MAX_DYNAMIC);
             for (let i = 0; i < count; i++) {
                 const p = dynamicParticles[i];
+                // Write position data
                 dynPositions[i*3] = p.pos.x;
                 dynPositions[i*3+1] = p.pos.y;
                 dynPositions[i*3+2] = p.pos.z;
+                // Write color data
                 dynColors[i*3] = p.color.r;
                 dynColors[i*3+1] = p.color.g;
                 dynColors[i*3+2] = p.color.b;
+                // Write size (fade out as particle ages by multiplying by life)
                 dynSizes[i] = p.size * p.life;
             }
+            // Signal to GPU that buffer data has changed
             dynGeometry.attributes.position.needsUpdate = true;
             dynGeometry.attributes.color.needsUpdate = true;
             dynGeometry.attributes.size.needsUpdate = true;
+            // Update draw range to only render active particles
             dynGeometry.setDrawRange(0, count);
 
-            // Core pulse decay
+            // Animate core: return to normal scale after pulse
             core.scale.lerp(new THREE.Vector3(1,1,1), 0.1);
+            // Animate core sprite color: pulsing hue variation
             coreSprite.material.color.setHSL(0.08 + Math.sin(time*3)*0.02, 0.8, 0.7);
+            // Animate light intensity: pulsing brightness
             pointLight.intensity = 1.2 + Math.sin(time*5)*0.3;
 
-            // Render
+            // Render scene from camera viewpoint
             renderer.render(scene, camera);
+            // Schedule next frame
             requestAnimationFrame(animate);
         }
 
-        // ---------- Resize ----------
+        // ===== HANDLE WINDOW RESIZE =====
+        // Recalculate camera and renderer when window size changes
         window.addEventListener('resize', () => {
+            // Update camera aspect ratio to match new window dimensions
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
+            // Update renderer size
             renderer.setSize(window.innerWidth, window.innerHeight);
+            // Update pixel ratio (handle device DPI changes)
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            // Update particle shader pixel ratio uniform
+            dynMaterial.uniforms.pixelRatio.value = Math.min(window.devicePixelRatio, 2);
         });
 
-        // Start
+        // Initialize and start animation loop
         updateCameraPosition();
         animate();
 
